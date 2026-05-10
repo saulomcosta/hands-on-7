@@ -1,0 +1,315 @@
+
+spring:
+  # =========================
+  # CONFIGURAÇÃO DA APLICAÇÃO
+  # =========================
+  application:
+    # Nome lógico da aplicação dentro do ecossistema Spring.
+    # Pode ser usado em logs, monitoramento, tracing, etc.
+    name: arquiteto
+
+  # =========================
+  # CONFIGURAÇÃO DO BANCO DE DADOS (DataSource)
+  # =========================
+  datasource:
+    # URL de conexão JDBC para o PostgreSQL:
+    # - localhost → banco rodando localmente
+    # - 5432 → porta padrão do PostgreSQL
+    # - orders → nome do banco
+    url: jdbc:postgresql://localhost:5433/appdb
+    # Driver JDBC responsável pela comunicação Java ↔ PostgreSQL
+    driverClassName: org.postgresql.Driver
+    # Usuário do banco de dados
+    username: admin
+    # Senha do usuário do banco de dados
+    password: admin
+
+  # =========================
+  # CONFIGURAÇÃO DO JPA / HIBERNATE
+  # =========================
+  jpa:
+    hibernate:
+      # Estratégia de manipulação do schema do banco:
+
+      # opções comuns:
+      # create   → apaga e recria tabelas a cada startup
+      # update   → atualiza schema automaticamente
+      # create-drop → cria ao iniciar e apaga ao parar
+      # validate → APENAS valida se estrutura existe (mais seguro em produção)
+
+      # Aqui você escolheu "validate":
+      # → o Hibernate NÃO cria tabelas
+      # → apenas verifica se o schema está correto
+      ddl-auto: validate
+    # Exibe no console todas as queries SQL geradas pelo Hibernate
+    # útil para debug e aprendizado
+    show-sql: true
+    properties:
+      hibernate:
+        # Dialeto do banco:
+        # informa ao Hibernate como gerar SQL específico do PostgreSQL
+
+        # OBS:
+        # versões modernas do Hibernate detectam automaticamente,
+        # então essa configuração muitas vezes é opcional
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    # Configuração de conexão com o broker RabbitMQ
+    # O RabbitMQ é responsável por mensageria assíncrona na aplicação,
+    # permitindo comunicação desacoplada entre serviços (ex: pedidos, pagamento, email)
+    # 🧠 Como isso é usado na aplicação:
+    # O Spring Boot usa essas configurações automaticamente para:
+    # - Criar conexão com o RabbitMQ
+    # - Gerenciar envio de mensagens (Producer)
+    # - Consumir mensagens (Consumer)
+    # - Integrar com filas, exchanges e bindings
+    # 📌 Exemplo de uso no projeto (futuro):
+    # - OrderService pode enviar evento: "ORDER_CREATED"
+    # - PaymentService pode consumir essa mensagem
+    # - EmailService pode reagir após pagamento confirmado
+    # 🚀 Benefícios:
+    # - Desacoplamento entre serviços
+    # - Escalabilidade
+    # - Processamento assíncrono
+    # - Maior resiliência (evita falha em cascata)
+    # ⚠️ Observação importante:
+    # Se estiver rodando via Docker Compose, use:
+    # host: rabbitmq
+    # (nome do serviço no docker-compose)
+    rabbitmq:
+      # Endereço do servidor RabbitMQ
+      # "localhost" indica que está rodando na mesma máquina da aplicação
+      # ⚠️ Se estiver usando Docker, normalmente será o nome do container (ex: rabbitmq)
+      host: localhost
+      # Porta padrão do protocolo AMQP (usado para envio/recebimento de mensagens)
+      # Essa é a porta que sua aplicação usa para se conectar ao broker
+      port: 5672
+      # Usuário padrão do RabbitMQ
+      # ⚠️ Em produção, NÃO usar "guest" por questões de segurança
+      username: guest
+      # Senha do usuário do RabbitMQ
+      # ⚠️ Também deve ser alterada em ambientes reais
+      password: guest
+      listener:
+        simple:
+          retry:
+          # Ativa o mecanismo de retry automático no listener (consumer)
+          # Quando ocorre uma exceção no @RabbitListener, a mensagem será reproces
+            enabled: true
+            # Número máximo de tentativas antes de considerar a mensagem como falha definitiva
+            # Após esse limite, a mensagem segue para DLQ (se configurado)
+            max-attempts: 3
+            # Tempo inicial (em milissegundos) antes da primeira tentativa de retry
+            # Ex: 1000 = 1 segundo
+            initial-interval: 1000
+            # Multiplicador para o tempo de espera entre tentativas (backoff exponencial)
+            # Ex:
+            # 1ª tentativa → 1s
+            # 2ª tentativa → 2s
+            # 3ª tentativa → 4
+            multiplier: 2.0
+            # ==== 🚀 CONCURRENCY (ESCALABILIDADE DO CONSUMER) ====
+            #
+            # Define o NÚMERO MÍNIMO de consumidores (threads)
+            # que irão consumir mensagens em paralelo.
+            #
+            # Exemplo:
+            # concurrency: 5 → sempre terá pelo menos 5 consumers ativos
+            #
+            # 👉 Impacto direto:
+            # - Mais paralelismo
+            # - Mais throughput (ou vazão) (msgs/s)
+            # - Mais uso de CPU
+            #
+            # ✅ QUANDO USAR:
+            # - Filas com alta carga (ex: payment, processamento pesado)
+            # - Quando há backlog (muitas mensagens em READY)
+            # - Quando seu sistema não está acompanhando o volume
+            #
+            # ❌ QUANDO NÃO USAR:
+            # - Processos leves (ex: envio de email simples)
+            # - Sistemas com pouca carga
+            # - Quando o banco/CPU já está no limite
+            #
+            # ⚠️ CUIDADO:
+            # - Aumentar demais pode causar:
+            #   → contenção no banco
+            #   → saturação de CPU
+            #   → gargalos downstream (APIs externas)
+            #
+          concurrency: 5
+          # ===== ⚡ MAX-CONCURRENCY (ESCALA DINÂMICA) =====
+          #
+          # Define o LIMITE MÁXIMO de consumidores que podem ser criados dinamicamente.
+          #
+          # Exemplo:
+          # min = 5 (concurrency)
+          # max = 10 (max-concurrency)
+          #
+          # 👉 comportamento:
+          #
+          # - Começa com 5 consumers
+          # - Se a fila crescer (READY ↑), o Spring cria mais consumidores
+          # - Pode chegar até 10 automaticamente
+          #
+          # 👉 Isso é AUTO-SCALING dentro do próprio serviço
+          #
+          # ✅ QUANDO USAR:
+          # - Sistemas com carga variável
+          # - Picos de tráfego (ex: Black Friday, batch, eventos)
+          # - Quando você quer elasticidade sem Kubernetes
+          #
+          # ❌ QUANDO NÃO USAR:
+          # - Carga constante previsível
+          # - Sistemas sensíveis a concorrência (ex: transações críticas)
+          #
+          # ⚠️ IMPORTANTE:
+          # - Só cresce se houver backlog (READY > 0)
+          # - Depende da performance do processamento
+          #
+          # 💡 ANALOGIA:
+          # concurrency → equipe base
+          # max-concurrency → contratar temporários quando aumenta demanda
+          #
+          max-concurrency: 10
+
+  # =========================
+  # CONSOLE DO H2 (DESENVOLVIMENTO)
+  # =========================
+  h2:
+    console:
+      # Habilita console web do H2 (banco em memória)
+
+      # IMPORTANTE:
+      # No seu caso você está usando PostgreSQL,
+      # então isso só tem efeito se você também estiver usando H2 em algum profile.
+      #
+      # Normalmente usado em:
+      # - testes
+      # - ambiente local leve
+      # - aprendizado
+      enabled: true
+
+# ========
+# 🪵 PADRÃO DE LOG NO CONSOLE (STDOUT)
+# ========
+#
+# Define como cada linha de log será formatada no console
+# (terminal da aplicação).
+#
+# 👉 Isso é CRÍTICO para:
+# - Observabilidade
+# - Debug em produção
+# - Rastreamento de requisições
+#
+logging:
+  pattern:
+   # ========  📅 %d{HH:mm:ss} → TIMESTAMP  ========
+    #
+    # Mostra o horário em que o log foi gerado.
+    #
+    # Exemplo:
+    # 13:45:21
+    #
+    # ✅ Permite:
+    # - análise de tempo de resposta
+    # - ordenação cronológica
+    # - debugging de eventos concorrentes
+    #
+    # 💡 Pode ser expandido para:
+    # %d{yyyy-MM-dd HH:mm:ss} (mais detalhado)
+    #
+
+    # =========  🧵 [%thread] → NOME DA THREAD =========
+    #
+    # Mostra qual thread executou aquele log.
+    #
+    # Exemplo:
+    # [http-nio-8080-exec-1]
+    # [SimpleAsyncTaskExecutor-3]
+    #
+    # ✅ Permite:
+    # - identificar concorrência
+    # - detectar paralelismo
+    # - entender comportamento assíncrono
+    #
+    # 🔥 ESSENCIAL para sistemas com:
+    # - RabbitMQ
+    # - Kafka
+    # - processamento paralelo
+    #
+
+    # ======= 🔗 [%X{correlationId}] → CONTEXTO MDC =======
+    #
+    # Recupera o valor armazenado no MDC (Mapped Diagnostic Context)
+    #
+    # Exemplo:
+    # MDC.put("correlationId", "abc-123")
+    #
+    # Resultado no log:
+    # [abc-123]
+    #
+    # ✅ PERMITE:
+    # - rastreamento ponta-a-ponta
+    # - correlação entre serviços
+    # - debug distribuído
+    #
+    # 🔥 EXTREMAMENTE IMPORTANTE:
+    # Sem isso, você NÃO consegue:
+    # - rastrear uma requisição completa
+    # - entender fluxo de eventos
+    #
+    # 👉 padrão usado em:
+    # - microservices
+    # - sistemas financeiros
+    # - plataformas distribuídas
+    #
+
+    # ======== 📊 %-5level → NÍVEL DO LOG ========
+    #
+    # Mostra o nível do log com padding de 5 caracteres
+    #
+    # Exemplos:
+    # INFO
+    # ERROR
+    # WARN
+    #
+    # O "-5" garante alinhamento visual:
+    #
+    # INFO  (com espaço)
+    # ERROR
+    #
+    # ✅ facilita leitura no console
+    #
+
+    # ======== 🧠 %logger → CLASSE ORIGEM DO LOG ========
+    #
+    # Mostra o nome da classe que gerou o log
+    #
+    # Exemplo:
+    # com.hands_on.arquiteto.service.OrderService
+    #
+    # ✅ Permite:
+    # - identificar origem do log
+    # - navegar rapidamente no código
+    #
+    # 💡 Pode reduzir tamanho:
+    # %logger{36}
+    #
+
+    # ========= 📝 %msg → MENSAGEM DO LOG ========
+    #
+    # Conteúdo que você escreveu no log (log.info, log.error, etc.)
+    #
+    # Exemplo:
+    # "Pedido criado com sucesso | orderId=123"
+    #
+
+    # ======== ⏎ %n → QUEBRA DE LINHA ========
+    #
+    # Garante que cada log fique em uma linha separada
+    #
+    # ✅ essencial para leitura correta
+    #
+    console: "%d{HH:mm:ss} [%thread] [%X{correlationId}] %-5level %logger - %msg%n"
+
+
